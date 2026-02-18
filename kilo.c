@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,6 +72,10 @@ struct editorConfig {
 };
 
 struct editorConfig E;
+
+/*** prototypes ***/
+
+void editorSetStatusMessage(const char *fmt, ...);
 
 /*** terminal ***/
 
@@ -380,6 +385,28 @@ void editorInsertChar(int c) {
 
 /*** file I/O ***/
 
+char *editorRowsToString(int *buf_len) {
+    int tot_len = 0;
+
+    // add up the lengths of each row of text, adding 1 to each one for the
+    // newline character we'll add to the end of each line
+    for (int i = 0; i < E.num_rows; i++) {
+        tot_len += E.rows[i].size + 1; // add one for '\n'
+    }
+    *buf_len = tot_len;
+
+    char *buf = malloc(tot_len);
+    char *p = buf;
+    for (int i = 0; i < E.num_rows; ++i) {
+        memcpy(p, E.rows[i].chars, E.rows[i].size);
+        p += E.rows[i].size;
+        *p = '\n';
+        p++;
+    }
+
+    return buf; // expecting the caller to free() the memory
+}
+
 // it will open and read a file from the disk
 void editorOpen(char *file_name) {
     free(E.file_name); // We may open more than one file at the same time
@@ -410,6 +437,36 @@ void editorOpen(char *file_name) {
     fclose(fp);
 }
 
+// More advanced text editors will write to a new, temporary file, and then
+// rename that file to the actual file the user wants to overwrite
+void editorSave() {
+    if (E.file_name == NULL)
+        return;
+
+    int len;
+    char *buf = editorRowsToString(&len);
+
+    // open for reading and writing. create if not exists
+    int fd = open(E.file_name, O_RDWR | O_CREAT, 0644);
+    if (fd != -1) {
+        // Sets the file's size to the specified length. If the file is larger
+        //  than that, it will cut off any data at the end of the file to make
+        //  it that length. If the file is shorter, it will add `0` bytes at
+        //  the end to make it that length.
+        if (ftruncate(fd, len) != -1) {
+            if (write(fd, buf, len) == len) {
+                close(fd);
+                free(buf);
+                editorSetStatusMessage("%d bytes written to disk", len);
+                return;
+            }
+        }
+        close(fd);
+    }
+
+    free(buf);
+    editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
 /*** append buffer ***/
 
 struct abuf {
@@ -496,6 +553,10 @@ void editorProcessKeypress() {
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
+        break;
+
+    case CTRL_KEY('w'): // C-w to save
+        editorSave();
         break;
 
     case HOME_KEY: // move the cursor to the beginning of the column
@@ -754,7 +815,7 @@ int main(int argc, char *argv[]) {
         editorOpen(argv[1]);
     }
 
-    editorSetStatusMessage("HELP: Ctrl-Q = quit");
+    editorSetStatusMessage("HELP: Ctrl-W = save | Ctrl-Q = quit");
 
     // read 1 byte from standard input into `c`
     while (1) {
