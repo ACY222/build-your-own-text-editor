@@ -33,10 +33,10 @@ automatically opens three descriptors for it:
 == *modes*
 
 In the world of Unix/Linux terminal programming, "modes" describe how the
-*Terminal Driver* (the software between your keyboard and your program)
+*Terminal Driver* (the software between your keyboard and the priogram)
 processes input before sending it to your application
 
-How to set them in C? You can change them using the `<termios.h>` struct flags:
+You can set them by using the `<termios.h>` struct flags:
 + *Canonical*: Default state (Flag `ICANON` is on)
 + *Raw*: You must manually disable several flags:
   - Disable `ICANON` (turn off the buffering)
@@ -49,10 +49,10 @@ How to set them in C? You can change them using the `<termios.h>` struct flags:
 This is the *default* mode for most command-line applications.
 - How it works: Input is *Line Buffered*
   - When you type, the data goes into a temporary buffer in the OS
-  - Your program (via `read()`) receives nothing until the user presses `Enter`
+  - The program (via `read()`) receives nothing until you press `Enter`
 - Features:
   - *Line Editing*: The user can use `Backspace` to fix mistakes. The terminal
-    driver handles this locally; your program never sees the deleted characters
+    driver handles this locally; the program never sees the deleted characters
   - *Signal Processing*: Special keys like `Ctrl+C` (SIGINT) or `Ctrl+Z` (SIGSTP)
     are intercepted by the system to terminate or suspend the program
 
@@ -60,14 +60,14 @@ This is the *default* mode for most command-line applications.
 
 This is the mode used by text editors and full-screen applications
 - How it works: Input is *Unbuffered*
-  - Data is sent to your program byte-by-byte, immediately upon keypress
+  - Data is sent to the priogram byte-by-byte, immediately upon keypress
 - Features:
-  - *No Processing*: The terminal driver passes everything through "raw."
+  - *No Processing*: The terminal driver passes everything directly.
   - *No Automatic Echo*: In Canonical mode, typing 'a' displays 'a'. In Raw
-    mode, you usually turn this off so your program controls exactly what is
+    mode, you usually turn this off so the priogram controls exactly what is
     drawn on the screen.
   - *No Signals*: For example, `Ctrl+C` is no longer a "kill" command; it is
-    just a byte. Your program must decide what to do with it
+    just a byte. the priogram must decide what to do with it
   - *CR/LF*: Pressing Enter sends a Carriage Return (`\r`, 13). It does not
     automatically become a Newline (`\n`, 10)
 
@@ -77,7 +77,7 @@ This is a hybrid mode, sometimes referred to as "Rare" mode (medium-well, as
 opposed to raw or cooked)
 - How it works: It is *Unbuffered*, but it keeps *Signal processing*
 - Features:
-  - Your program gets input immediately (no waiting for Enter)
+  - the priogram gets input immediately (no waiting for Enter)
   - However, `Ctrl + C` will still kill the program instantly
 - Use Case: Programs that need instant reaction but don't need full control over
   the keyboard, like `top`
@@ -100,11 +100,19 @@ The Escape Character is the trigger that starts a command
 - *Function*: When the terminal driver sees this byte, it stops printing
   characters to the screen and enters a "command state", waiting for a specific
   sequence of characters to follow
+- *CSI*: `\x1b[` is the *Control Sequence Introducer*, which is the most common
+  way to start an ANSI Escape Sequence.
 
 === The Escape Sequence
 
-An *Escape Sequence* is the full string of characters that follows the Escape
+- An *Escape Sequence* is the full string of characters that follows the Escape
 character to perform a specific task.
+- Escape sequences always start with an escape character (`\x1b`) followed by a
+`[`. Escape sequences instruct the terminal to do various text
+formatting tasks, such as coloring text, moving the cursor around, and
+clearing parts of the screen
+- Escape sequence commands take arguments, which come before the command
+hide the cursor before refreshing the screen
 
 === Common Examples
 
@@ -152,9 +160,9 @@ void *memmove(void *dest, const void *src, size_t n);
 
 == ```C realloc()```
 
-In C, ```C realloc()``` is a powerful memory management function that resizes a
-previously allocated memory block. It is essentially a "dynamic resizing" tool
-that tries to be as efficient as possible by avoiding unnecessary data copying.
+```C realloc()``` *resizes a previously allocated memory block*. It is
+essentially a "dynamic resizing" tool that tries to be as efficient as
+possible by avoiding unnecessary data copying.
 + ```C realloc()``` check the memory immediately following the current block at
   first.
   - If there is enough space directly after current block, the allocator simply
@@ -193,3 +201,27 @@ enum editorKey {
 ```
 
 == Variadic Function
+
+```C
+// ... makes it a variadic function
+// It accepts a *format string* followed by a variable number of arguments,
+//  which mimics the behavior of standard functions like `printf`
+//  - `fmt`: The fixed starting argument, like "saved %d lines"
+//  - `...`: The variable arguments that fill the placeholders in `fmt`
+void editorSetStatusMessage(const char *fmt, ...) {
+    // declare a variable (argument pointer) to traverse the list of extra
+    //  arguments
+    va_list ap;
+    // initialize `ap` to point to the first argument after `fmt`, this is why
+    //  you must always have at least one named parameter
+    va_start(ap, fmt);
+    // int vsnprintf(char * restrict str, size_t size, const char * restrict
+    //  format, va_list ap);
+    vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+    // cleans up the memory associated with the argument list traversal
+    va_end(ap);
+}
+
+// We can call it as follows:
+editorSetStatusMessage("Hello, %s! This is %d.", name, year);
+```

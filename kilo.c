@@ -39,11 +39,13 @@ enum editorKey {
 
 /*** data ***/
 
+// The characters we store in memory are not always the same as the characters
+// we draw on the screen
 typedef struct erow {
-    int size;
-    int rsize;
-    char *chars;
-    char *render;
+    int size;     // size of the raw string (file content)
+    int rsize;    // size of the rendered string (screen content)
+    char *chars;  // the actual raw characters from the file
+    char *render; // the characters as they appear on screen, like tabs expanded
 } erow;
 
 struct termios orig_termios;
@@ -52,11 +54,11 @@ struct editorConfig {
     // keep track of the cursor's x and y position in the file
     int cx, cy;
     int rx;      // an index into the render field
-    int row_off; // row offset, refers to what's at the top of the screen
-    int col_off;
-    int screen_rows;
-    int screen_cols;
-    int num_rows;
+    int row_off; // row offset, refers to which row at the top of the screen
+    int col_off; // col offset, refers to which column at the left of the screen
+    int screen_rows; // number of rows the screen can display
+    int screen_cols; // number of cols the screen can display
+    int num_rows;    // number of rows of the file
     erow *rows;
     char *file_name;
     char statusmsg[80];
@@ -80,6 +82,7 @@ void die(const char *s) {
 }
 
 void disableRawMode() {
+    // set the terminal attricutes to its original value
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1) {
         die("tcsetattr");
     }
@@ -300,20 +303,22 @@ int editorRowCxToRx(erow *row, int cx) {
 // expand tab to spaces
 void editorUpdateRow(erow *row) {
     // count the number of tabs to know how much memory to allocate
-    int tabs = 0;
+    int num_tabs = 0;
     for (int j = 0; j < row->size; j++) {
         if (row->chars[j] == '\t') {
-            tabs++;
+            num_tabs++;
         }
     }
 
     free(row->render); // free previous row's render
-    row->render = malloc(row->size + tabs * (KILO_TAB_STOP - 1) + 1);
+    row->render = malloc(row->size + num_tabs * (KILO_TAB_STOP - 1) + 1);
 
     int idx = 0;
+    // expand tabs into spaces
     for (int j = 0; j < row->size; j++) {
         if (row->chars[j] == '\t') {
             row->render[idx++] = ' ';
+            // PAY ATTENTION! tab : spaces != 1 : KILO_TAB_STOP
             while (idx % KILO_TAB_STOP != 0) {
                 row->render[idx++] = ' ';
             }
@@ -325,13 +330,14 @@ void editorUpdateRow(erow *row) {
     row->rsize = idx;
 }
 
-// each time we append a row to E.rows
 void editorAppendRow(char *s, size_t len) {
+    // each time we append a row to E.rows
     E.rows = realloc(E.rows, sizeof(erow) * (E.num_rows + 1));
 
     int at = E.num_rows; // the index of the new row
     E.rows[at].size = len;
     E.rows[at].chars = malloc(len + 1);
+    // E.rows[at].chars and s don't overlap, so use memcpy instead of memmove
     memcpy(E.rows[at].chars, s, len);
     E.rows[at].chars[len] = '\0';
 
@@ -346,7 +352,7 @@ void editorAppendRow(char *s, size_t len) {
 
 // it will open and read a file from the disk
 void editorOpen(char *file_name) {
-    free(E.file_name);
+    free(E.file_name); // We may open more than one file at the same time
     E.file_name = strdup(file_name); // strdup: save a copy of a string
     // mode: "r": Open for reading, "w": Open for writing, "a": Open for
     // appending
@@ -358,14 +364,14 @@ void editorOpen(char *file_name) {
     size_t line_cap = 0;
     ssize_t line_len;
     // We pass getline a null line pointer and a linecap of 0. That makes it
-    // allocate new memory for the next line it reads,and set line to point to
+    // allocate new memory for the next line it reads, and set line to point to
     // the memory, and set linecap to let you know how much memory it allocated.
-    // It rturn value is the length of the line it reads, or -1 if it's at the
+    // It return value is the length of the line it reads, or -1 if it's at the
     // end of the file and there are no more lines to read
     while ((line_len = getline(&line, &line_cap, fp)) != -1) {
         // truncate '\r\n' or '\n' at the end
         while (line_len > 0 &&
-               (line[line_len - 1] == '\n' || line[line_len - 1] == 'r')) {
+               (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
             line_len--;
         }
         editorAppendRow(line, line_len);
@@ -384,6 +390,8 @@ struct abuf {
 #define ABUF_INIT {NULL, 0}
 
 void abAppend(struct abuf *ab, const char *s, int len) {
+    // realloc() will copy the contents of the old block to the new one, and
+    // then free() the old one automatically
     char *new = realloc(ab->b, ab->len + len);
 
     if (new == NULL) {
@@ -513,6 +521,7 @@ void editorScroll() {
     else if (E.cy >= E.row_off + E.screen_rows) {
         E.row_off = E.cy - E.screen_rows + 1;
     }
+
     if (E.rx < E.col_off) {
         E.col_off = E.rx;
     } else if (E.rx >= E.col_off + E.screen_cols) {
@@ -534,14 +543,14 @@ void editorDrawRows(struct abuf *ab) {
                 // *restrict
                 //  format, ...); write at most size-1 of the characters printed
                 //  into the output string
-                int welcomelen =
+                int welcome_len =
                     snprintf(welcome, sizeof(welcome),
                              "Kilo editor --version %s", KILO_VERSION);
-                if (welcomelen > E.screen_cols) {
-                    welcomelen = E.screen_cols;
+                if (welcome_len > E.screen_cols) {
+                    welcome_len = E.screen_cols;
                 }
                 // center the welcome
-                int padding = (E.screen_cols - welcomelen) / 2;
+                int padding = (E.screen_cols - welcome_len) / 2;
                 if (padding) {
                     abAppend(ab, "~", 1);
                     padding--;
@@ -549,7 +558,7 @@ void editorDrawRows(struct abuf *ab) {
                 while (padding--) {
                     abAppend(ab, " ", 1);
                 }
-                abAppend(ab, welcome, welcomelen);
+                abAppend(ab, welcome, welcome_len);
             } else {
                 // \x1b[K:  clear each line as we draw them, argument 0 erases
                 // the part of the line to the right of the cursor
@@ -564,6 +573,7 @@ void editorDrawRows(struct abuf *ab) {
             }
             abAppend(ab, &E.rows[file_row].render[E.col_off], len);
         }
+        // clean up the rest of the line
         abAppend(ab, "\x1b[K", 3);
 
         abAppend(ab, "\r\n", 2);
@@ -574,10 +584,13 @@ void editorDrawStatusBar(struct abuf *ab) {
     // switch to inverted colors (black text on a white background)
     abAppend(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
+    // file name
     int len = snprintf(status, sizeof(status), "%.20s",
                        E.file_name ? E.file_name : "[No Name]");
-    int rlen =
-        snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.num_rows);
+    // current position
+    int progress = (E.cy + 1) * 100 / E.num_rows;
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d | %d%%", E.cy + 1,
+                        E.num_rows, progress);
     if (len > E.screen_cols) {
         len = E.screen_cols;
     }
@@ -604,6 +617,7 @@ void editorDrawMessageBar(struct abuf *ab) {
     if (msg_len > E.screen_cols) {
         msg_len = E.screen_cols;
     }
+    // display 5 seconds
     if (msg_len && time(NULL) - E.statusmsg_time < 5) {
         abAppend(ab, E.statusmsg, msg_len);
     }
@@ -613,14 +627,7 @@ void editorRefreshScreen() {
     editorScroll();
 
     struct abuf ab = ABUF_INIT;
-    // We are writing 4 bytes out to the terminal
-    // The first byte `\x1b` is the escape character, or 27 in decimal
-    // Escape sequences always start with an escape character (27) followed by a
-    //  `[`. Escape sequences instruct the terminal to do various text
-    //  formatting tasks, such as coloring text, moving the cursor around, and
-    //  clearing parts of the screen
-    // Escape sequence commands take arguments, which come before the command
-    // hide the cursor before refreshing the screen
+    // \x1b[?25l: make the cursor invisible
     abAppend(&ab, "\x1b[?25l", 6);
     // \x1b[H: reposition the cursor at the top-left corner
     abAppend(&ab, "\x1b[H", 3);
@@ -642,13 +649,22 @@ void editorRefreshScreen() {
     abFree(&ab);
 }
 
-// ... makes it a variadic function, which can take any number of arguments
+// ... makes it a variadic function
+// It accepts a *format string* followed by a variable number of arguments,
+//  which mimics the behavior of standard functions like `printf`
+//  - `fmt`: The fixed starting argument, like "saved %d lines"
+//  - `...`: The variable arguments that fill the placeholders in `fmt`
 void editorSetStatusMessage(const char *fmt, ...) {
+    // declare a variable (argument pointer) to traverse the list of extra
+    //  arguments
     va_list ap;
+    // initialize `ap` to point to the first argument after `fmt`, this is why
+    //  you must always have at least one named parameter
     va_start(ap, fmt);
     // int vsnprintf(char * restrict str, size_t size, const char * restrict
     //  format, va_list ap);
     vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+    // cleans up the memory associated with the argument list traversal
     va_end(ap);
     E.statusmsg_time = time(NULL); // get the current time
 }
@@ -670,7 +686,8 @@ void initEditor() {
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("getWindowSize");
     }
-    // make room for a two-line status/message bar at the bottom of the screen
+    // make room for a two-line status (file name, cursor position, etc.) and
+    //  message bar at the bottom of the screen
     E.screen_rows -= 2;
 }
 
@@ -678,7 +695,7 @@ void initEditor() {
 //  program itseflf
 // argv: The actual text of the arguments.
 //  indexing:
-//      argv[0]: the name/path of the executable
+//      argv[0]: the path of the executable
 //      argv[1]: The first user-provided argument
 //      argv[2]: The second argument, and so on
 int main(int argc, char *argv[]) {
