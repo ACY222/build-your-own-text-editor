@@ -24,6 +24,10 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 enum editorKey {
+    // `Backspace` doesn't have a human-readable backslash-escape representation
+    //  in C, so we make it part of the `editorKey` enum and assign it its ASCII
+    //  value of 127
+    BACKSPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT, // 1001
     ARROW_UP,    // 1002
@@ -348,6 +352,32 @@ void editorAppendRow(char *s, size_t len) {
     E.num_rows++;
 }
 
+// insert a character into a row
+void editorRowInsertChar(erow *row, int at, int c) {
+    // at is allowed to go one character past the end of the string
+    if (at < 0 || at > row->size) {
+        at = row->size;
+    }
+
+    // we add 2 because we also have to make room for the null byte
+    row->chars = realloc(row->chars, row->size + 2);
+    memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+    row->size++;
+    row->chars[at] = c;
+    editorUpdateRow(row);
+}
+
+/*** editor operations ***/
+
+void editorInsertChar(int c) {
+    // if the cursor is on the tilde line after the end of the file
+    if (E.cy == E.num_rows) {
+        editorAppendRow("", 0);
+    }
+    editorRowInsertChar(&E.rows[E.cy], E.cx, c);
+    E.cx++;
+}
+
 /*** file I/O ***/
 
 // it will open and read a file from the disk
@@ -457,21 +487,32 @@ void editorMoveCursor(int key) {
 void editorProcessKeypress() {
     int c = editorReadKey();
     switch (c) {
-    case CTRL_KEY('q'):
+    case '\r': // Enter
+        // TODO
+        break;
+
+    case CTRL_KEY('q'): // C-q to quit
         // clear the screen and reposition the cursor when the program exits
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
         break;
 
-    case HOME_KEY:
+    case HOME_KEY: // move the cursor to the beginning of the column
         E.cx = 0;
         break;
-    case END_KEY:
+    case END_KEY: // move the cursor to the end of the column
         if (E.cy < E.num_rows) {
             E.cx = E.rows[E.cy].size;
         }
         break;
+
+    case BACKSPACE:
+    case CTRL_KEY('h'):
+    case DEL_KEY:
+        // TODO
+        break;
+
     case PAGE_UP:
     case PAGE_DOWN: {
         if (c == PAGE_UP) {
@@ -499,6 +540,13 @@ void editorProcessKeypress() {
     case ARROW_UP:
     case ARROW_DOWN:
         editorMoveCursor(c);
+        break;
+
+    case CTRL_KEY('l'):
+    case '\x1b':
+        break;
+    default:
+        editorInsertChar(c);
         break;
     }
 }
