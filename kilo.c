@@ -65,6 +65,7 @@ struct editorConfig {
     int screen_cols; // number of cols the screen can display
     int num_rows;    // number of rows of the file
     erow *rows;
+    int dirty; // a buffer is dirty if it has been modified
     char *file_name;
     char statusmsg[80];
     time_t statusmsg_time;
@@ -355,6 +356,7 @@ void editorAppendRow(char *s, size_t len) {
     editorUpdateRow(&E.rows[at]);
 
     E.num_rows++;
+    E.dirty++;
 }
 
 // insert a character into a row
@@ -370,6 +372,7 @@ void editorRowInsertChar(erow *row, int at, int c) {
     row->size++;
     row->chars[at] = c;
     editorUpdateRow(row);
+    E.dirty++;
 }
 
 /*** editor operations ***/
@@ -435,6 +438,7 @@ void editorOpen(char *file_name) {
     }
     free(line);
     fclose(fp);
+    E.dirty = 0;
 }
 
 // More advanced text editors will write to a new, temporary file, and then
@@ -457,6 +461,7 @@ void editorSave() {
             if (write(fd, buf, len) == len) {
                 close(fd);
                 free(buf);
+                E.dirty = 0;
                 editorSetStatusMessage("%d bytes written to disk", len);
                 return;
             }
@@ -694,8 +699,9 @@ void editorDrawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
     // file name
-    int len = snprintf(status, sizeof(status), "%.20s",
-                       E.file_name ? E.file_name : "[No Name]");
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+                       E.file_name ? E.file_name : "[No Name]", E.num_rows,
+                       E.dirty ? "(modified)" : "");
     // current position
     int progress = (E.cy + 1) * 100 / E.num_rows;
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d | %d%%", E.cy + 1,
@@ -788,6 +794,7 @@ void initEditor() {
     E.col_off = 0;
     E.num_rows = 0;
     E.rows = NULL;
+    E.dirty = 0;
     E.file_name = NULL;
     E.statusmsg[0] = '\0';
     E.statusmsg_time = 0;
