@@ -19,7 +19,7 @@
 
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 8
-#define KILO_QUIT_TIMES 3
+#define KILO_QUIT_TIMES 1
 
 // ^a-^z: 1-26, 0x1f = 0b0001_1111
 // In C, you generally specify bitmasks using hexadecimal, since C doesn't have
@@ -228,20 +228,23 @@ int editorReadKey() {
         }
 
         return '\x1b';
-    } else if (c == 'h' || c == 'j' || c == 'k' || c == 'l') {
-        switch (c) {
-        case 'h':
-            return ARROW_LEFT;
-        case 'j':
-            return ARROW_DOWN;
-        case 'k':
-            return ARROW_UP;
-        case 'l':
-            return ARROW_RIGHT;
-        default: // Obviously, this path won't happen
-            return ARROW_LEFT;
-        }
-    } else {
+    }
+    // disable hjkl
+    // else if (c == 'h' || c == 'j' || c == 'k' || c == 'l') {
+    //     switch (c) {
+    //     case 'h':
+    //         return ARROW_LEFT;
+    //     case 'j':
+    //         return ARROW_DOWN;
+    //     case 'k':
+    //         return ARROW_UP;
+    //     case 'l':
+    //         return ARROW_RIGHT;
+    //     default: // Obviously, this path won't happen
+    //         return ARROW_LEFT;
+    //     }
+    // }
+    else {
         return c;
     }
 }
@@ -377,6 +380,17 @@ void editorRowInsertChar(erow *row, int at, int c) {
     E.dirty++;
 }
 
+void editorRowDelChar(erow *row, int at) {
+    if (at < 0 || at >= row->size) {
+        return;
+    }
+
+    memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+    row->size--;
+    editorUpdateRow(row);
+    E.dirty++;
+}
+
 /*** editor operations ***/
 
 void editorInsertChar(int c) {
@@ -386,6 +400,16 @@ void editorInsertChar(int c) {
     }
     editorRowInsertChar(&E.rows[E.cy], E.cx, c);
     E.cx++;
+}
+
+void editorDelChar() {
+    if (E.cy == E.num_rows)
+        return;
+    erow *row = &E.rows[E.cy];
+    if (E.cx > 0) {
+        editorRowDelChar(row, E.cx - 1);
+        E.cx--;
+    }
 }
 
 /*** file I/O ***/
@@ -559,7 +583,8 @@ void editorProcessKeypress() {
 
     case CTRL_KEY('q'): // C-q to quit
         // If the file is dirty, we will display a warning, and require the
-        // user to press C-q three more times in order to quit without saving
+        // user to press C-q KILO_QUIT_TIMES more times in order to quit without
+        // saving
         if (E.dirty && quit_times > 0) {
             editorSetStatusMessage("WARNING!!! File has unsaved changes. "
                                    "Press Ctrl-Q %d more times to quit.",
@@ -589,7 +614,9 @@ void editorProcessKeypress() {
     case BACKSPACE:
     case CTRL_KEY('h'):
     case DEL_KEY:
-        // TODO
+        if (c == DEL_KEY)
+            editorMoveCursor(ARROW_RIGHT);
+        editorDelChar();
         break;
 
     case PAGE_UP:
