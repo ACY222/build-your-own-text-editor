@@ -67,7 +67,7 @@ struct editorConfig {
     int screen_cols; // number of cols the screen can display
     int num_rows;    // number of rows of the file
     erow *rows;
-    int dirty; // a buffer is dirty if it has been modified
+    int dirty; // indicates the number of changes
     char *file_name;
     char statusmsg[80];
     time_t statusmsg_time;
@@ -364,6 +364,20 @@ void editorAppendRow(char *s, size_t len) {
     E.dirty++;
 }
 
+void editorFreeRow(erow *row) {
+    free(row->render);
+    free(row->chars);
+}
+
+void editorDelRow(int at) {
+    if (at < 0 || at >= E.num_rows)
+        return;
+    editorFreeRow(&E.rows[at]); // free current row
+    memmove(&E.rows[at], &E.rows[at + 1], sizeof(erow) * (E.num_rows - at - 1));
+    E.num_rows--;
+    E.dirty++;
+}
+
 // insert a character into a row
 void editorRowInsertChar(erow *row, int at, int c) {
     // at is allowed to go one character past the end of the string
@@ -376,6 +390,16 @@ void editorRowInsertChar(erow *row, int at, int c) {
     memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
     row->size++;
     row->chars[at] = c;
+    editorUpdateRow(row);
+    E.dirty++;
+}
+
+// append a string s with length len to a erow row
+void editorRowAppendString(erow *row, char *s, size_t len) {
+    row->chars = realloc(row->chars, row->size + len + 1);
+    memcpy(&row->chars[row->size], s, len);
+    row->size += len;
+    row->chars[row->size] = '\0';
     editorUpdateRow(row);
     E.dirty++;
 }
@@ -405,10 +429,21 @@ void editorInsertChar(int c) {
 void editorDelChar() {
     if (E.cy == E.num_rows)
         return;
+    if (E.cx == 0 && E.cy == 0)
+        return;
+
     erow *row = &E.rows[E.cy];
     if (E.cx > 0) {
         editorRowDelChar(row, E.cx - 1);
         E.cx--;
+    }
+    // if E.cx == 0,
+    // append current row to previous row, and then delete current row
+    else {
+        E.cx = E.rows[E.cy - 1].size;
+        editorRowAppendString(&E.rows[E.cy - 1], row->chars, row->size);
+        editorDelRow(E.cy);
+        E.cy--;
     }
 }
 
