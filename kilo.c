@@ -79,6 +79,8 @@ struct editorConfig E;
 /*** prototypes ***/
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 /*** terminal ***/
 
@@ -527,8 +529,13 @@ void editorOpen(char *file_name) {
 // More advanced text editors will write to a new, temporary file, and then
 // rename that file to the actual file the user wants to overwrite
 void editorSave() {
-    if (E.file_name == NULL)
-        return;
+    if (E.file_name == NULL) {
+        E.file_name = editorPrompt("Save as: %s");
+        if (E.file_name == NULL) {
+            editorSetStatusMessage("Save aborted");
+            return;
+        }
+    }
 
     int len;
     char *buf = editorRowsToString(&len);
@@ -581,6 +588,46 @@ void abAppend(struct abuf *ab, const char *s, int len) {
 void abFree(struct abuf *ab) { free(ab->b); }
 
 /*** input ***/
+
+char *editorPrompt(char *prompt) {
+    size_t buf_size = 128;
+    char *buf = malloc(buf_size);
+
+    size_t buf_len = 0;
+    buf[0] = '\0';
+
+    while (1) {
+        // the `prompt` is expected to be a format string containing a %s, which
+        // is where the user's input will be displayed
+        editorSetStatusMessage(prompt, buf);
+        editorRefreshScreen();
+
+        int c = editorReadKey();
+        if (c == CTRL_KEY('h') || c == BACKSPACE) {
+            if (buf_len != 0) {
+                buf[--buf_len] = '\0';
+            }
+        }
+        // press Escape to cancel the input prompt
+        else if (c == '\x1b') {
+            editorSetStatusMessage("");
+            free(buf);
+            return NULL;
+        } else if (c == '\r') {
+            if (buf_len != 0) {
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } else if (!iscntrl(c) && c < 128) {
+            if (buf_len == buf_size - 1) {
+                buf_size *= 2;
+                buf = realloc(buf, buf_size);
+            }
+            buf[buf_len++] = c;
+            buf[buf_len] = '\0';
+        }
+    }
+}
 
 void editorMoveCursor(int key) {
     // E.cy is allowed to be oone past the last line of the file
