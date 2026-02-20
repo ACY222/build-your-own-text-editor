@@ -345,11 +345,14 @@ void editorUpdateRow(erow *row) {
     row->rsize = idx;
 }
 
-void editorAppendRow(char *s, size_t len) {
+void editorInsertRow(int at, char *s, size_t len) {
+    if (at < 0 || at > E.num_rows)
+        return;
+
     // each time we append a row to E.rows
     E.rows = realloc(E.rows, sizeof(erow) * (E.num_rows + 1));
+    memmove(&E.rows[at + 1], &E.rows[at], sizeof(erow) * (E.num_rows - at));
 
-    int at = E.num_rows; // the index of the new row
     E.rows[at].size = len;
     E.rows[at].chars = malloc(len + 1);
     // E.rows[at].chars and s don't overlap, so use memcpy instead of memmove
@@ -420,10 +423,28 @@ void editorRowDelChar(erow *row, int at) {
 void editorInsertChar(int c) {
     // if the cursor is on the tilde line after the end of the file
     if (E.cy == E.num_rows) {
-        editorAppendRow("", 0);
+        editorInsertRow(E.num_rows, "", 0);
     }
     editorRowInsertChar(&E.rows[E.cy], E.cx, c);
     E.cx++;
+}
+
+void editorInsertNewline() {
+    // insert a new blank row before the line we are on
+    if (E.cx == 0) {
+        editorInsertRow(E.cy, "", 0);
+    } else {
+        // insert a new line and truncate current line
+        erow *row = &E.rows[E.cy];
+        editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+        row = &E.rows[E.cy];
+        row->size = E.cx;
+        row->chars[row->size] = '\0';
+        editorUpdateRow(row);
+    }
+    // reposition the cursor
+    E.cy++;
+    E.cx = 0;
 }
 
 void editorDelChar() {
@@ -495,7 +516,7 @@ void editorOpen(char *file_name) {
                (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
             line_len--;
         }
-        editorAppendRow(line, line_len);
+        editorInsertRow(E.num_rows, line, line_len);
     }
     free(line);
     fclose(fp);
@@ -613,7 +634,7 @@ void editorProcessKeypress() {
     int c = editorReadKey();
     switch (c) {
     case '\r': // Enter
-        // TODO
+        editorInsertNewline();
         break;
 
     case CTRL_KEY('q'): // C-q to quit
