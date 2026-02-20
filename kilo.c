@@ -19,6 +19,8 @@
 
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 8
+#define KILO_QUIT_TIMES 3
+
 // ^a-^z: 1-26, 0x1f = 0b0001_1111
 // In C, you generally specify bitmasks using hexadecimal, since C doesn't have
 // binary literals
@@ -547,6 +549,8 @@ void editorMoveCursor(int key) {
 //  different editor functions, and insert any alphanumeric and other printable
 //  key's characters into the text that is being edited
 void editorProcessKeypress() {
+    static int quit_times = KILO_QUIT_TIMES;
+
     int c = editorReadKey();
     switch (c) {
     case '\r': // Enter
@@ -554,6 +558,15 @@ void editorProcessKeypress() {
         break;
 
     case CTRL_KEY('q'): // C-q to quit
+        // If the file is dirty, we will display a warning, and require the
+        // user to press C-q three more times in order to quit without saving
+        if (E.dirty && quit_times > 0) {
+            editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+                                   "Press Ctrl-Q %d more times to quit.",
+                                   quit_times);
+            quit_times--;
+            return;
+        }
         // clear the screen and reposition the cursor when the program exits
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
@@ -615,6 +628,8 @@ void editorProcessKeypress() {
         editorInsertChar(c);
         break;
     }
+
+    quit_times = KILO_QUIT_TIMES;
 }
 
 /*** output ***/
