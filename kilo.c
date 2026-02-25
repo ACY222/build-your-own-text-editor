@@ -308,13 +308,28 @@ int getWindowSize(int *rows, int *cols) {
 
 int editorRowCxToRx(erow *row, int cx) {
     int rx = 0;
-    for (int j = 0; j < cx; j++) {
-        if (row->chars[j] == '\t') {
+    for (int i = 0; i < cx; i++) {
+        if (row->chars[i] == '\t') {
             rx += (KILO_TAB_STOP - 1) - (rx % KILO_TAB_STOP);
         }
         rx++;
     }
     return rx;
+}
+
+int editorRowRxToCx(erow *row, int rx) {
+    int cur_rx = 0, cx;
+    for (cx = 0; cx < row->size; cx++) {
+        if (row->chars[cx] == '\t') {
+            cur_rx += (KILO_TAB_STOP - 1) - (cur_rx % KILO_TAB_STOP);
+        }
+        cur_rx++;
+
+        if (cur_rx > rx) {
+            return cx;
+        }
+    }
+    return cx; // in case rx is out of range
 }
 
 // expand tab to spaces
@@ -562,6 +577,36 @@ void editorSave() {
     free(buf);
     editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
+
+/*** find ***/
+
+void editorFind() {
+    char *query = editorPrompt("Search: %s (ESC to cancel)");
+    if (query == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < E.num_rows; i++) {
+        erow *row = &E.rows[i];
+        // strstr: locate a substring in a string
+        // return a pointer if succeed, NULL otherwise
+        char *match = strstr(row->render, query);
+        if (match) {
+            E.cy = i;
+            E.cx = match - row->render;
+            E.cx = editorRowRxToCx(row, match - row->render);
+            // so that we are scrolled to the very bottom of the file, which
+            // will cause editorScroll() to scroll upwards at the next screen
+            // refresh so that the matching line will be at the very top of the
+            // screen
+            E.row_off = E.num_rows;
+            break;
+        }
+    }
+
+    free(query);
+}
+
 /*** append buffer ***/
 
 struct abuf {
@@ -713,6 +758,10 @@ void editorProcessKeypress() {
         if (E.cy < E.num_rows) {
             E.cx = E.rows[E.cy].size;
         }
+        break;
+
+    case CTRL_KEY('f'):
+        editorFind();
         break;
 
     case BACKSPACE:
