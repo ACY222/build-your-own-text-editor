@@ -934,7 +934,20 @@ void editorDrawRows(struct abuf *ab) {
                 len = E.screen_cols;
             }
             abAppend(ab, &E.rows[file_row].render[E.col_off], len);
+
+            char *c = &E.rows[file_row].render[E.col_off];
+            for (int i = 0; i < len; i++) {
+                if (isdigit(c[i])) {
+                    // set and rest the color
+                    abAppend(ab, "\x1b[31m", 5);
+                    abAppend(ab, &c[i], 1);
+                    abAppend(ab, "\x1b[39m", 5);
+                } else {
+                    abAppend(ab, &c[i], 1);
+                }
+            }
         }
+
         // clean up the rest of the line
         abAppend(ab, "\x1b[K", 3);
 
