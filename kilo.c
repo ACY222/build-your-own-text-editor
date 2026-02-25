@@ -581,17 +581,43 @@ void editorSave() {
 /*** find ***/
 
 void editorFindCallback(char *query, int key) {
+    static int last_match = -1;
+    // 1 means next line, -1 means previous line
+    static int direction = 1;
+
     if (key == '\r' || key == '\x1b') {
+        last_match = -1;
+        direction = 1;
         return;
+    } else if (key == ARROW_RIGHT || key == ARROW_DOWN) {
+        direction = 1;
+    } else if (key == ARROW_LEFT || key == ARROW_UP) {
+        direction = -1;
+    } else {
+        last_match = -1;
+        direction = 1;
     }
 
+    if (last_match == -1) {
+        direction = 1;
+    }
+    int current = last_match; // the index of the row we are searching
+
     for (int i = 0; i < E.num_rows; i++) {
-        erow *row = &E.rows[i];
+        current += direction;
+        if (current == -1) { // 0 + -1, search backwards
+            current = E.num_rows - 1;
+        } else if (current == E.num_rows) { // num_rows-1 + 1, search forwards
+            current = 0;
+        }
+
+        erow *row = &E.rows[current];
         // strstr: locate a substring in a string
         // return a pointer if succeed, NULL otherwise
         char *match = strstr(row->render, query);
         if (match) {
-            E.cy = i;
+            last_match = current;
+            E.cy = last_match;
             E.cx = match - row->render;
             E.cx = editorRowRxToCx(row, match - row->render);
             // so that we are scrolled to the very bottom of the file, which
@@ -604,12 +630,13 @@ void editorFindCallback(char *query, int key) {
     }
 }
 
+// we only search the first matched string in each line
 void editorFind() {
     int saved_cx = E.cx, saved_cy = E.cy;
     int saved_row_off = E.row_off, saved_col_off = E.col_off;
 
     char *query =
-        editorPrompt("Search: %s (ESC to cancel)", editorFindCallback);
+        editorPrompt("Search: %s (Use ESC/Arrows/Enter)", editorFindCallback);
 
     if (query) {
         free(query);
