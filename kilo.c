@@ -80,7 +80,7 @@ struct editorConfig E;
 
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
-char *editorPrompt(char *prompt);
+char *editorPrompt(char *prompt, void (*callback)(char *, int));
 
 /*** terminal ***/
 
@@ -545,7 +545,7 @@ void editorOpen(char *file_name) {
 // rename that file to the actual file the user wants to overwrite
 void editorSave() {
     if (E.file_name == NULL) {
-        E.file_name = editorPrompt("Save as: %s");
+        E.file_name = editorPrompt("Save as: %s", NULL);
         if (E.file_name == NULL) {
             editorSetStatusMessage("Save aborted");
             return;
@@ -580,9 +580,8 @@ void editorSave() {
 
 /*** find ***/
 
-void editorFind() {
-    char *query = editorPrompt("Search: %s (ESC to cancel)");
-    if (query == NULL) {
+void editorFindCallback(char *query, int key) {
+    if (key == '\r' || key == '\x1b') {
         return;
     }
 
@@ -603,8 +602,15 @@ void editorFind() {
             break;
         }
     }
+}
 
-    free(query);
+void editorFind() {
+    char *query =
+        editorPrompt("Search: %s (ESC to cancel)", editorFindCallback);
+
+    if (query) {
+        free(query);
+    }
 }
 
 /*** append buffer ***/
@@ -634,7 +640,9 @@ void abFree(struct abuf *ab) { free(ab->b); }
 
 /*** input ***/
 
-char *editorPrompt(char *prompt) {
+// the if statements allow the caller to pass NULL for the callback, in case
+// they don't want to use a callback (when we prompt the user for a filename)
+char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
     size_t buf_size = 128;
     char *buf = malloc(buf_size);
 
@@ -656,11 +664,17 @@ char *editorPrompt(char *prompt) {
         // press Escape to cancel the input prompt
         else if (c == '\x1b') {
             editorSetStatusMessage("");
+            if (callback) {
+                callback(buf, c);
+            }
             free(buf);
             return NULL;
         } else if (c == '\r') {
             if (buf_len != 0) {
                 editorSetStatusMessage("");
+                if (callback) {
+                    callback(buf, c);
+                }
                 return buf;
             }
         } else if (!iscntrl(c) && c < 128) {
@@ -670,6 +684,10 @@ char *editorPrompt(char *prompt) {
             }
             buf[buf_len++] = c;
             buf[buf_len] = '\0';
+        }
+
+        if (callback) {
+            callback(buf, c);
         }
     }
 }
