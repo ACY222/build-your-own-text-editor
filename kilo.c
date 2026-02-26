@@ -44,6 +44,12 @@ enum editorKey {
     PAGE_DOWN,
 };
 
+// it contains the possible values that the `hl` array can contain
+enum editorHighlight {
+    HL_NORMAL = 0,
+    HL_NUMBER,
+};
+
 /*** data ***/
 
 // The characters we store in memory are not always the same as the characters
@@ -53,6 +59,7 @@ typedef struct erow {
     int rsize;    // size of the rendered string (screen content)
     char *chars;  // the actual raw characters from the file
     char *render; // the characters as they appear on screen, like tabs expanded
+    unsigned char *hl; // highlight
 } erow;
 
 struct termios orig_termios;
@@ -304,6 +311,32 @@ int getWindowSize(int *rows, int *cols) {
     }
 }
 
+/*** syntax highlighting ***/
+
+void editorUpdateSyntax(erow *row) {
+    row->hl = realloc(row->hl, row->rsize);
+    memset(row->hl, HL_NORMAL, row->rsize);
+
+    int in_number = 0;
+    for (int i = 0; i < row->rsize; i++) {
+        if (isdigit(row->render[i]) || (in_number && row->render[i] == '.')) {
+            in_number = 1;
+            row->hl[i] = HL_NUMBER;
+        } else {
+            in_number = 0;
+        }
+    }
+}
+
+int editorSyntaxToColor(int hl) {
+    switch (hl) {
+    case HL_NUMBER:
+        return 31; // foreground red
+    default:
+        return 37; // foreground white
+    }
+}
+
 /*** row operations ***/
 
 int editorRowCxToRx(erow *row, int cx) {
@@ -360,6 +393,8 @@ void editorUpdateRow(erow *row) {
     }
     row->render[idx] = '\0';
     row->rsize = idx;
+
+    editorUpdateSyntax(row);
 }
 
 void editorInsertRow(int at, char *s, size_t len) {
@@ -378,6 +413,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 
     E.rows[at].rsize = 0;
     E.rows[at].render = NULL;
+    E.rows[at].hl = NULL;
     editorUpdateRow(&E.rows[at]);
 
     E.num_rows++;
@@ -387,6 +423,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 void editorFreeRow(erow *row) {
     free(row->render);
     free(row->chars);
+    free(row->hl);
 }
 
 void editorDelRow(int at) {
@@ -936,16 +973,32 @@ void editorDrawRows(struct abuf *ab) {
             abAppend(ab, &E.rows[file_row].render[E.col_off], len);
 
             char *c = &E.rows[file_row].render[E.col_off];
+            unsigned char *hl = &E.rows[file_row].hl[E.col_off];
+            int current_color = -1;
+            // We don't have to write out an escape sequence before every single
+            // character. Instead we only print out an escape sequence when the
+            // color changes
             for (int i = 0; i < len; i++) {
-                if (isdigit(c[i])) {
-                    // set and rest the color
-                    abAppend(ab, "\x1b[31m", 5);
+                if (hl[i] == HL_NORMAL) {
+                    if (current_color != -1) {
+                        abAppend(ab, "\x1b[39m", 5);
+                        current_color = -1;
+                    }
                     abAppend(ab, &c[i], 1);
-                    abAppend(ab, "\x1b[39m", 5);
                 } else {
+                    int color = editorSyntaxToColor(hl[i]);
+                    if (color != current_color) {
+                        current_color = color;
+                        char buf[16];
+                        int clen =
+                            snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+                        abAppend(ab, buf, clen);
+                    }
                     abAppend(ab, &c[i], 1);
                 }
             }
+            // make sure the text color is reset to default finally
+            abAppend(ab, "\x1b[39m", 5);
         }
 
         // clean up the rest of the line
