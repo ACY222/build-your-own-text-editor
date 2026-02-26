@@ -48,6 +48,7 @@ enum editorKey {
 enum editorHighlight {
     HL_NORMAL = 0,
     HL_NUMBER,
+    HL_MATCH,
 };
 
 /*** data ***/
@@ -332,6 +333,8 @@ int editorSyntaxToColor(int hl) {
     switch (hl) {
     case HL_NUMBER:
         return 31; // foreground red
+    case HL_MATCH:
+        return 34; // foreground blue
     default:
         return 37; // foreground white
     }
@@ -622,6 +625,15 @@ void editorFindCallback(char *query, int key) {
     // 1 means next line, -1 means previous line
     static int direction = 1;
 
+    static int saved_hl_line;
+    static char *saved_hl = NULL;
+
+    if (saved_hl) {
+        memcpy(E.rows[saved_hl_line].hl, saved_hl, E.rows[saved_hl_line].rsize);
+        free(saved_hl);
+        saved_hl = NULL;
+    }
+
     if (key == '\r' || key == '\x1b') {
         last_match = -1;
         direction = 1;
@@ -662,6 +674,11 @@ void editorFindCallback(char *query, int key) {
             // refresh so that the matching line will be at the very top of the
             // screen
             E.row_off = E.num_rows;
+
+            saved_hl_line = current;
+            saved_hl = malloc(row->rsize);
+            memcpy(saved_hl, row->hl, row->rsize);
+            memset(&row->hl[match - row->render], HL_MATCH, strlen(query));
             break;
         }
     }
@@ -970,7 +987,6 @@ void editorDrawRows(struct abuf *ab) {
             } else if (len > E.screen_cols) {
                 len = E.screen_cols;
             }
-            abAppend(ab, &E.rows[file_row].render[E.col_off], len);
 
             char *c = &E.rows[file_row].render[E.col_off];
             unsigned char *hl = &E.rows[file_row].hl[E.col_off];
