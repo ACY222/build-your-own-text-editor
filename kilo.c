@@ -314,18 +314,33 @@ int getWindowSize(int *rows, int *cols) {
 
 /*** syntax highlighting ***/
 
+int is_separator(int c) {
+    // strchr() locates the first occurrence of c in the string pointed to by s
+    return isspace(c) || c == '\0' || strchr("\",.()+-/*=~%<>[];", c) != NULL;
+}
+
 void editorUpdateSyntax(erow *row) {
     row->hl = realloc(row->hl, row->rsize);
     memset(row->hl, HL_NORMAL, row->rsize);
 
-    int in_number = 0;
-    for (int i = 0; i < row->rsize; i++) {
-        if (isdigit(row->render[i]) || (in_number && row->render[i] == '.')) {
-            in_number = 1;
+    int prev_sep = 1;
+
+    int i = 0;
+    while (i < row->rsize) {
+        char c = row->render[i];
+        unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
+
+        // avoid highlighting "32" in "int32_t"
+        if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) ||
+            (c == '.' && prev_hl == HL_NUMBER)) {
             row->hl[i] = HL_NUMBER;
-        } else {
-            in_number = 0;
+            i++;
+            prev_sep = 0;
+            continue;
         }
+
+        prev_sep = is_separator(c);
+        i++;
     }
 }
 
