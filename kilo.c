@@ -47,6 +47,7 @@ enum editorKey {
 // it contains the possible values that the `hl` array can contain
 enum editorHighlight {
     HL_NORMAL = 0,
+    HL_COMMENT,
     HL_STRING,
     HL_NUMBER,
     HL_MATCH,
@@ -62,6 +63,7 @@ struct editorSyntax {
     char *file_type;
     // array of strings, each string contain a pattern to match a filename
     char **file_match;
+    char *single_line_comment_start;
     // a bit field that will contain flags for whether to highlight numbers and
     // whether to highlight strings for the filetype
     int flags;
@@ -105,7 +107,7 @@ char *C_HL_extensions[] = {".c", ".h", ".cpp", NULL};
 
 // highlight database
 struct editorSyntax HLDB[] = {
-    {"c", C_HL_extensions, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
+    {"c", C_HL_extensions, "//", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
 };
 
 // length of HLDB array
@@ -354,6 +356,9 @@ void editorUpdateSyntax(erow *row) {
         return;
     }
 
+    char *slcs = E.syntax->single_line_comment_start;
+    int slcs_len = slcs ? strlen(slcs) : 0;
+
     int prev_sep = 1;
     int in_string = 0;
 
@@ -361,6 +366,14 @@ void editorUpdateSyntax(erow *row) {
     while (i < row->rsize) {
         char c = row->render[i];
         unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
+
+        if (slcs_len && !in_string) {
+            // compares not more than slcs_len characters
+            if (!strncmp(&row->render[i], slcs, slcs_len)) {
+                memset(&row->hl[i], HL_COMMENT, row->rsize - i);
+                break;
+            }
+        }
 
         if (E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
             if (in_string) {
@@ -406,6 +419,8 @@ void editorUpdateSyntax(erow *row) {
 
 int editorSyntaxToColor(int hl) {
     switch (hl) {
+    case HL_COMMENT:
+        return 36;
     case HL_STRING:
         return 35;
     case HL_NUMBER:
