@@ -1161,6 +1161,21 @@ void editorDrawRows(struct abuf *ab) {
             // character. Instead we only print out an escape sequence when the
             // color changes
             for (int i = 0; i < len; i++) {
+                // translate nonprintable characters into A-Z or ?
+                if (iscntrl(c[i])) {
+                    // A-Z is after @
+                    char sym = (c[i] <= 26) ? '@' + c[i] : '?';
+                    abAppend(ab, "\x1b[7m", 4);
+                    abAppend(ab, &sym, 1);
+                    abAppend(ab, "\x1b[m", 3);
+
+                    if (current_color != -1) {
+                        char buf[16];
+                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm",
+                                            current_color);
+                        abAppend(ab, buf, clen);
+                    }
+                }
                 if (hl[i] == HL_NORMAL) {
                     if (current_color != -1) {
                         abAppend(ab, "\x1b[39m", 5);
