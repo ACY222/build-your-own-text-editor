@@ -51,7 +51,19 @@ enum editorHighlight {
     HL_MATCH,
 };
 
+#define HL_HIGHLIGHT_NUMBERS (1 << 0)
+
 /*** data ***/
+
+struct editorSyntax {
+    // the name of the filetype that will be displayed in the status bar
+    char *file_type;
+    // array of strings, each string contain a pattern to match a filename
+    char **file_match;
+    // a bit field that will contain flags for whether to highlight numbers and
+    // whether to highlight strings for the filetype
+    int flags;
+};
 
 // The characters we store in memory are not always the same as the characters
 // we draw on the screen
@@ -79,10 +91,23 @@ struct editorConfig {
     char *file_name;
     char statusmsg[80];
     time_t statusmsg_time;
+    struct editorSyntax *syntax;
     struct termios orig_termios;
 };
 
 struct editorConfig E;
+
+/*** file types ***/
+
+char *C_HL_extensions[] = {".c", ".h", ".cpp", NULL};
+
+// highlight database
+struct editorSyntax HLDB[] = {
+    {"c", C_HL_extensions, HL_HIGHLIGHT_NUMBERS},
+};
+
+// length of HLDB array
+#define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))
 
 /*** prototypes ***/
 
@@ -323,6 +348,10 @@ void editorUpdateSyntax(erow *row) {
     row->hl = realloc(row->hl, row->rsize);
     memset(row->hl, HL_NORMAL, row->rsize);
 
+    if (E.syntax == NULL) {
+        return;
+    }
+
     int prev_sep = 1;
 
     int i = 0;
@@ -330,13 +359,15 @@ void editorUpdateSyntax(erow *row) {
         char c = row->render[i];
         unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
 
-        // avoid highlighting "32" in "int32_t"
-        if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) ||
-            (c == '.' && prev_hl == HL_NUMBER)) {
-            row->hl[i] = HL_NUMBER;
-            i++;
-            prev_sep = 0;
-            continue;
+        if (E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
+            // avoid highlighting "32" in "int32_t"
+            if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) ||
+                (c == '.' && prev_hl == HL_NUMBER)) {
+                row->hl[i] = HL_NUMBER;
+                i++;
+                prev_sep = 0;
+                continue;
+            }
         }
 
         prev_sep = is_separator(c);
@@ -355,6 +386,38 @@ int editorSyntaxToColor(int hl) {
     }
 }
 
+void editorSelectSyntaxHighlight() {
+    E.syntax = NULL;
+    if (E.file_name == NULL) {
+        return;
+    }
+
+    // strrchr() locates the last occurence of c in s
+    // get a pointer to the extension part of filename
+    char *ext = strrchr(E.file_name, '.');
+
+    for (unsigned int i = 0; i < HLDB_ENTRIES; i++) {
+        // char *file_type, char **file_match, int flags
+        struct editorSyntax *s = &HLDB[i];
+        unsigned int j = 0;
+        while (s->file_match[j]) {
+            int is_ext = (s->file_match[j][0] == '.');
+            // strcmp() returns 0 if two given strings are equal
+            // strstr() tries to find a little string in a big string
+            if ((is_ext && ext && !strcmp(ext, s->file_match[j])) ||
+                (!is_ext && strstr(E.file_name, s->file_match[j]))) {
+                E.syntax = s;
+
+                for (int file_row = 0; file_row < E.num_rows; file_row++) {
+                    editorUpdateSyntax(&E.rows[file_row]);
+                }
+
+                return;
+            }
+            j++;
+        }
+    }
+}
 /*** row operations ***/
 
 int editorRowCxToRx(erow *row, int cx) {
@@ -569,6 +632,9 @@ char *editorRowsToString(int *buf_len) {
 void editorOpen(char *file_name) {
     free(E.file_name); // We may open more than one file at the same time
     E.file_name = strdup(file_name); // strdup: save a copy of a string
+
+    editorSelectSyntaxHighlight();
+
     // mode: "r": Open for reading, "w": Open for writing, "a": Open for
     // appending
     FILE *fp = fopen(file_name, "r");
@@ -605,6 +671,7 @@ void editorSave() {
             editorSetStatusMessage("Save aborted");
             return;
         }
+        editorSelectSyntaxHighlight();
     }
 
     int len;
@@ -1049,7 +1116,8 @@ void editorDrawStatusBar(struct abuf *ab) {
                        E.dirty ? "(modified)" : "");
     // current position
     int progress = (E.cy + 1) * 100 / E.num_rows;
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d | %d%%", E.cy + 1,
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d:%d | %d%%",
+                        E.syntax ? E.syntax->file_type : "no ft", E.cy + 1,
                         E.num_rows, progress);
     if (len > E.screen_cols) {
         len = E.screen_cols;
@@ -1142,6 +1210,7 @@ void initEditor() {
     E.dirty = 0;
     E.file_name = NULL;
     E.statusmsg[0] = '\0';
+    E.syntax = NULL; // no filetype for current file
     E.statusmsg_time = 0;
 
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
