@@ -48,6 +48,7 @@ enum editorKey {
 enum editorHighlight {
     HL_NORMAL = 0,
     HL_COMMENT,
+    HL_MLCOMMENT,
     HL_KEYWORD1,
     HL_KEYWORD2,
     HL_STRING,
@@ -67,6 +68,8 @@ struct editorSyntax {
     char **file_match;
     char **keywords;
     char *single_line_comment_start;
+    char *multi_line_comment_start;
+    char *multi_line_comment_end;
     // a bit field that will contain flags for whether to highlight numbers and
     // whether to highlight strings for the filetype
     int flags;
@@ -75,11 +78,13 @@ struct editorSyntax {
 // The characters we store in memory are not always the same as the characters
 // we draw on the screen
 typedef struct erow {
+    int index;    // index in the file
     int size;     // size of the raw string (file content)
     int rsize;    // size of the rendered string (screen content)
     char *chars;  // the actual raw characters from the file
     char *render; // the characters as they appear on screen, like tabs expanded
     unsigned char *hl; // highlight
+    int hl_open_comment;
 } erow;
 
 struct termios orig_termios;
@@ -116,7 +121,7 @@ char *C_HL_keywords[] = {"switch",    "if",      "while",   "for",    "break",
 
 // highlight database
 struct editorSyntax HLDB[] = {
-    {"c", C_HL_extensions, C_HL_keywords, "//",
+    {"c", C_HL_extensions, C_HL_keywords, "//", "/*", "*/",
      HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
 };
 
@@ -368,21 +373,51 @@ void editorUpdateSyntax(erow *row) {
 
     char **keywords = E.syntax->keywords;
     char *slcs = E.syntax->single_line_comment_start;
+    char *mlcs = E.syntax->multi_line_comment_start;
+    char *mlce = E.syntax->multi_line_comment_end;
+
     int slcs_len = slcs ? strlen(slcs) : 0;
+    int mlcs_len = mlcs ? strlen(mlcs) : 0;
+    int mlce_len = mlce ? strlen(mlce) : 0;
 
     int prev_sep = 1;
     int in_string = 0;
+    // true if the previous row has an unclosed multi-line comment
+    int in_comment = (row->index > 0 && E.rows[row->index - 1].hl_open_comment);
 
     int i = 0;
     while (i < row->rsize) {
         char c = row->render[i];
         unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
 
-        if (slcs_len && !in_string) {
+        // single-line comments should not be recognized inside multi-line
+        // comments
+        if (slcs_len && !in_string && !in_comment) {
             // compares not more than slcs_len characters
             if (!strncmp(&row->render[i], slcs, slcs_len)) {
                 memset(&row->hl[i], HL_COMMENT, row->rsize - i);
                 break;
+            }
+        }
+
+        if (mlcs_len && mlce_len && !in_string) {
+            if (in_comment) {
+                row->hl[i] = HL_MLCOMMENT;
+                if (!strncmp(&row->render[i], mlce, mlce_len)) {
+                    memset(&row->hl[i], HL_MLCOMMENT, mlce_len);
+                    i += mlce_len;
+                    in_comment = 0;
+                    prev_sep = 1;
+                    continue;
+                } else {
+                    i++;
+                    continue;
+                }
+            } else if (!strncmp(&row->render[i], mlcs, mlcs_len)) {
+                memset(&row->hl[i], HL_MLCOMMENT, mlcs_len);
+                i += mlcs_len;
+                in_comment = 1;
+                continue;
             }
         }
 
@@ -449,11 +484,19 @@ void editorUpdateSyntax(erow *row) {
         prev_sep = is_separator(c);
         i++;
     }
+
+    int changed = (row->hl_open_comment != in_comment);
+    // check whether the row ended as unclosed multi-line comment or not
+    row->hl_open_comment = in_comment;
+    if (changed && row->index + 1 < E.num_rows) {
+        editorUpdateSyntax(&E.rows[row->index + 1]);
+    }
 }
 
 int editorSyntaxToColor(int hl) {
     switch (hl) {
     case HL_COMMENT:
+    case HL_MLCOMMENT:
         return 36;
     case HL_KEYWORD1:
         return 33;
@@ -569,7 +612,13 @@ void editorInsertRow(int at, char *s, size_t len) {
     // each time we append a row to E.rows
     E.rows = realloc(E.rows, sizeof(erow) * (E.num_rows + 1));
     memmove(&E.rows[at + 1], &E.rows[at], sizeof(erow) * (E.num_rows - at));
+    // update the index of each row whenever a row is inserted into or removed
+    // from the file
+    for (int i = at + 1; i <= E.num_rows; i++) {
+        E.rows[i].index++;
+    }
 
+    E.rows[at].index = at;
     E.rows[at].size = len;
     E.rows[at].chars = malloc(len + 1);
     // E.rows[at].chars and s don't overlap, so use memcpy instead of memmove
@@ -579,6 +628,7 @@ void editorInsertRow(int at, char *s, size_t len) {
     E.rows[at].rsize = 0;
     E.rows[at].render = NULL;
     E.rows[at].hl = NULL;
+    E.rows[at].hl_open_comment = 0;
     editorUpdateRow(&E.rows[at]);
 
     E.num_rows++;
@@ -596,6 +646,9 @@ void editorDelRow(int at) {
         return;
     editorFreeRow(&E.rows[at]); // free current row
     memmove(&E.rows[at], &E.rows[at + 1], sizeof(erow) * (E.num_rows - at - 1));
+    for (int i = at; i < E.num_rows - 1; i++) {
+        E.rows[i].index--;
+    }
     E.num_rows--;
     E.dirty++;
 }
