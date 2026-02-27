@@ -48,6 +48,8 @@ enum editorKey {
 enum editorHighlight {
     HL_NORMAL = 0,
     HL_COMMENT,
+    HL_KEYWORD1,
+    HL_KEYWORD2,
     HL_STRING,
     HL_NUMBER,
     HL_MATCH,
@@ -63,6 +65,7 @@ struct editorSyntax {
     char *file_type;
     // array of strings, each string contain a pattern to match a filename
     char **file_match;
+    char **keywords;
     char *single_line_comment_start;
     // a bit field that will contain flags for whether to highlight numbers and
     // whether to highlight strings for the filetype
@@ -104,10 +107,17 @@ struct editorConfig E;
 /*** file types ***/
 
 char *C_HL_extensions[] = {".c", ".h", ".cpp", NULL};
+// terminate the second type of keywords with a pipe character
+char *C_HL_keywords[] = {"switch",    "if",      "while",   "for",    "break",
+                         "continue",  "return",  "else",    "struct", "union",
+                         "typedef",   "static",  "enum",    "class",  "case",
+                         "int|",      "long|",   "double|", "float|", "char|",
+                         "unsigned|", "signed|", "void|",   NULL};
 
 // highlight database
 struct editorSyntax HLDB[] = {
-    {"c", C_HL_extensions, "//", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
+    {"c", C_HL_extensions, C_HL_keywords, "//",
+     HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
 };
 
 // length of HLDB array
@@ -356,6 +366,7 @@ void editorUpdateSyntax(erow *row) {
         return;
     }
 
+    char **keywords = E.syntax->keywords;
     char *slcs = E.syntax->single_line_comment_start;
     int slcs_len = slcs ? strlen(slcs) : 0;
 
@@ -412,6 +423,29 @@ void editorUpdateSyntax(erow *row) {
             }
         }
 
+        if (prev_sep) {
+            int j;
+            for (j = 0; keywords[j]; j++) {
+                int klen = strlen(keywords[j]);
+                int kw2 = keywords[j][klen - 1] == '|';
+                if (kw2) {
+                    klen--;
+                }
+
+                if (!strncmp(&row->render[i], keywords[j], klen) &&
+                    is_separator(row->render[i + klen])) {
+                    memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
+                    i += klen;
+                    break;
+                }
+            }
+            // check if the loop was broken out of
+            if (keywords[j] != NULL) {
+                prev_sep = 0;
+                continue;
+            }
+        }
+
         prev_sep = is_separator(c);
         i++;
     }
@@ -421,6 +455,10 @@ int editorSyntaxToColor(int hl) {
     switch (hl) {
     case HL_COMMENT:
         return 36;
+    case HL_KEYWORD1:
+        return 33;
+    case HL_KEYWORD2:
+        return 32;
     case HL_STRING:
         return 35;
     case HL_NUMBER:
