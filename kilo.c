@@ -272,7 +272,7 @@ int editorReadKey() {
                     return END_KEY;
                 }
             }
-        } else if (seq[0] == '0') {
+        } else if (seq[0] == 'O') {
             switch (seq[1]) {
             case 'H':
                 return HOME_KEY;
@@ -282,23 +282,7 @@ int editorReadKey() {
         }
 
         return '\x1b';
-    }
-    // disable hjkl
-    // else if (c == 'h' || c == 'j' || c == 'k' || c == 'l') {
-    //     switch (c) {
-    //     case 'h':
-    //         return ARROW_LEFT;
-    //     case 'j':
-    //         return ARROW_DOWN;
-    //     case 'k':
-    //         return ARROW_UP;
-    //     case 'l':
-    //         return ARROW_RIGHT;
-    //     default: // Obviously, this path won't happen
-    //         return ARROW_LEFT;
-    //     }
-    // }
-    else {
+    } else {
         return c;
     }
 }
